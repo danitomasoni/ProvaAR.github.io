@@ -1,63 +1,41 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-    <title>BIM AR - Allineamento Definitivo</title>
+    <title>BIM AR - S26 Ultra Precision</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
         body { margin: 0; overflow: hidden; font-family: sans-serif; }
-        
-        /* Pannello UI che rimarrà visibile in AR */
-        #ui-container { 
-            position: absolute; 
-            bottom: 50px; 
-            width: 100%; 
-            text-align: center; 
-            z-index: 9999; /* Altissimo */
-            pointer-events: auto;
+        #ar-overlay { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+            display: none; pointer-events: none; z-index: 10;
         }
-
         #status-panel { 
-            position: absolute; 
-            top: 20px; 
-            left: 50%; 
-            transform: translateX(-50%);
-            width: 80%; 
-            text-align: center; 
-            z-index: 9999;
-            background: rgba(0,0,0,0.7); 
-            color: white; 
-            padding: 10px; 
-            border-radius: 8px;
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            width: 80%; text-align: center; background: rgba(0,0,0,0.8); 
+            color: white; padding: 15px; border-radius: 12px; pointer-events: none;
+        }
+        #ui-container { 
+            position: absolute; bottom: 60px; width: 100%; text-align: center; 
             pointer-events: none;
         }
-
         .btn-ui { 
-            background: #28a745; 
-            color: white; 
-            border: 2px solid white; 
-            padding: 20px 30px; 
-            border-radius: 12px; 
-            font-weight: bold; 
-            font-size: 18px; 
-            margin: 10px; 
-            display: none; /* Inizialmente nascosti */
-            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            background: #28a745; color: white; border: 2px solid white; 
+            padding: 20px 30px; border-radius: 15px; font-weight: bold; 
+            font-size: 18px; pointer-events: auto; /* IMPORTANTE */
+            display: inline-block; margin: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.5);
         }
-        
-        /* Stile per il bottone AR standard di Three.js */
-        #ARButton {
-            bottom: 20px !important;
-        }
+        .btn-ui:active { background: #1e7e34; transform: scale(0.95); }
     </style>
 </head>
 <body>
     <div id="ar-overlay">
-        <div id="status-panel"><div id="status-text">Caricamento Modello...</div></div>
-        
+        <div id="status-panel">
+            <div id="status-text">Inquadra il pavimento e muovi il telefono...</div>
+        </div>
         <div id="ui-container">
             <button id="btn-p1" class="btn-ui">FISSA PUNTO 1 (QR1)</button>
-            <button id="btn-p2" class="btn-ui">FISSA PUNTO 2 (QR2)</button>
+            <button id="btn-p2" class="btn-ui" style="display:none;">FISSA PUNTO 2 (QR2)</button>
         </div>
     </div>
 
@@ -100,27 +78,25 @@
             renderer.xr.enabled = true;
             document.body.appendChild(renderer.domElement);
 
-            // CONFIGURAZIONE FONDAMENTALE PER VEDERE I TASTI
-            const options = {
+            const arButton = ARButton.createButton(renderer, {
                 requiredFeatures: ['hit-test'],
                 optionalFeatures: ['dom-overlay'],
-                domOverlay: { root: overlay } // Diciamo all'AR di tenere visibile questo div
-            };
-            document.body.appendChild(ARButton.createButton(renderer, options));
+                domOverlay: { root: overlay }
+            });
+            document.body.appendChild(arButton);
 
             scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1));
 
-            // Mirino
+            // Mirino più visibile (Giallo acceso)
             reticle = new THREE.Mesh(
-                new THREE.RingGeometry(0.1, 0.12, 32).rotateX(-Math.PI / 2),
-                new THREE.MeshBasicMaterial({ color: 0x00ff00 })
+                new THREE.RingGeometry(0.08, 0.1, 32).rotateX(-Math.PI / 2),
+                new THREE.MeshBasicMaterial({ color: 0xffff00 })
             );
             reticle.matrixAutoUpdate = false;
             reticle.visible = false;
             scene.add(reticle);
 
-            const loader = new GLTFLoader();
-            loader.load('./modello.glb', (gltf) => {
+            new GLTFLoader().load('./modello.glb', (gltf) => {
                 model = gltf.scene;
                 model.traverse(c => {
                     if (c.name.includes('QR_CODE1')) c.getWorldPosition(p1_digital);
@@ -128,30 +104,32 @@
                 });
                 model.visible = false;
                 scene.add(model);
-                statusText.innerText = "Modello caricato. Clicca START AR";
+                statusText.innerText = "Modello Caricato. Clicca START AR";
             });
 
             renderer.xr.addEventListener('sessionstart', () => {
-                btnP1.style.display = 'inline-block';
-                statusText.innerText = "Muovi il telefono per trovare il pavimento";
+                overlay.style.display = 'block';
             });
 
-            btnP1.onclick = () => {
+            btnP1.onclick = (e) => {
+                e.preventDefault();
                 if (reticle.visible) {
                     p1_real = new THREE.Vector3().setFromMatrixPosition(reticle.matrix);
                     btnP1.style.display = 'none';
                     btnP2.style.display = 'inline-block';
-                    statusText.innerText = "QR1 fissato. Vai al QR2";
+                    statusText.innerText = "Punto 1 Salvato! Vai al QR 2";
+                } else {
+                    statusText.innerText = "ERRORE: Pavimento non rilevato. Muovi il telefono!";
                 }
             };
 
-            btnP2.onclick = () => {
+            btnP2.onclick = (e) => {
+                e.preventDefault();
                 if (reticle.visible) {
                     p2_real = new THREE.Vector3().setFromMatrixPosition(reticle.matrix);
                     calibrate();
                     btnP2.style.display = 'none';
-                    statusText.innerText = "Allineato!";
-                    reticle.visible = false;
+                    statusText.innerText = "ALLINEATO CON SUCCESSO!";
                 }
             };
 
@@ -177,7 +155,7 @@
             if (frame) {
                 const session = renderer.xr.getSession();
                 const referenceSpace = renderer.xr.getReferenceSpace();
-                if (hitTestSourceRequested === false) {
+                if (!hitTestSourceRequested) {
                     session.requestReferenceSpace('viewer').then(refSpace => {
                         session.requestHitTestSource({ space: refSpace }).then(source => hitTestSource = source);
                     });
@@ -185,10 +163,11 @@
                 }
                 if (hitTestSource) {
                     const hitTestResults = frame.getHitTestResults(hitTestSource);
-                    if (hitTestResults.length) {
+                    if (hitTestResults.length > 0) {
                         const hit = hitTestResults[0];
                         reticle.visible = true;
                         reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
+                        if(p1_real == null) statusText.innerText = "Pavimento trovato! Clicca QR1";
                     } else {
                         reticle.visible = false;
                     }

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <title>AR BIM Alignment - Danitomasoni</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+        #ui-container { position: absolute; bottom: 30px; left: 0; width: 100%; text-align: center; z-index: 100; }
+        .btn { background: #007bff; color: white; border: none; padding: 15px 30px; border-radius: 50px; font-weight: bold; font-size: 16px; margin: 5px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        .btn:disabled { background: #6c757d; }
+        #status { position: absolute; top: 20px; width: 100%; text-align: center; color: white; z-index: 100; text-shadow: 2px 2px 4px #000; }
+    </style>
+</head>
+<body>
+    <div id="status">Caricamento modello...</div>
+    <div id="ui-container">
+        <button id="btn-ar" class="btn" style="display:none;">AVVIA AR</button>
+        <button id="btn-p2" class="btn" style="display:none;">FISSA PUNTO 2</button>
+    </div>
+
+    <script type="module">
+        import { ARButton } from 'https://unpkg.com/three@0.128.0/examples/jsm/webxr/ARButton.js';
+        import { GLTFLoader } from 'https://unpkg.com/three@0.128.0/examples/jsm/loaders/GLTFLoader.js';
+
+        let scene, camera, renderer, model;
+        let p1_digital = new THREE.Vector3();
+        let p2_digital = new THREE.Vector3();
+        let p1_real = null, p2_real = null;
+
+        const status = document.getElementById('status');
+        const btnAR = document.getElementById('btn-ar');
+        const btnP2 = document.getElementById('btn-p2');
+
+        init();
+
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 50);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+            scene.add(light);
+
+            // 1. CARICAMENTO MODELLO
+            const loader = new GLTFLoader();
+            loader.load('modello.glb', (gltf) => {
+                model = gltf.scene;
+                
+                // Cerca i cubi QR nel modello
+                model.traverse((child) => {
+                    if (child.name === 'QR_CODE1') child.getWorldPosition(p1_digital);
+                    if (child.name === 'QR_CODE2') child.getWorldPosition(p2_digital);
+                });
+
+                console.log("Punti Digitali Rilevati:", p1_digital, p2_digital);
+                model.visible = false;
+                scene.add(model);
+                
+                status.innerText = "Modello pronto. Vai al QR 1.";
+                btnAR.style.display = 'inline-block';
+            });
+
+            // Gestione Sessione AR
+            btnAR.addEventListener('click', () => {
+                navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['local-floor'] }).then(onSessionStarted);
+            });
+
+            btnP2.addEventListener('click', () => {
+                const controller = renderer.xr.getController(0);
+                p2_real = new THREE.Vector3().setFromMatrixPosition(controller.matrixWorld);
+                calibrate();
+                btnP2.innerText = "ALLINEATO ✅";
+                setTimeout(() => btnP2.style.display = 'none', 2000);
+            });
+        }
+
+        function onSessionStarted(session) {
+            renderer.xr.setSession(session);
+            btnAR.style.display = 'none';
+            btnP2.style.display = 'inline-block';
+            status.innerText = "Punta il telefono sul QR 1 e premi 'FISSA PUNTO 2' quando sei al secondo QR.";
+            
+            // Fissiamo P1_real all'inizio della sessione (la tua posizione attuale)
+            p1_real = new THREE.Vector3(0, 0, 0); 
+            model.visible = true;
+            renderer.setAnimationLoop(render);
+        }
+
+        function calibrate() {
+            if (!p1_real || !p2_real) return;
+
+            // SCALA
+            const d_dig = p1_digital.distanceTo(p2_digital);
+            const d_real = p1_real.distanceTo(p2_real);
+            model.scale.setScalar(d_real / d_dig);
+
+            // ROTAZIONE
+            const v_dig = new THREE.Vector3().subVectors(p2_digital, p1_digital).normalize();
+            const v_real = new THREE.Vector3().subVectors(p2_real, p1_real).normalize();
+            const angle = Math.atan2(v_real.x, v_real.z) - Math.atan2(v_dig.x, v_dig.z);
+            model.rotation.y = angle;
+
+            // POSIZIONAMENTO (allinea QR_CODE1 digitale con P1 reale)
+            // Dobbiamo sottrarre la posizione locale di QR_CODE1 per centrarlo
+            model.position.copy(p1_real).sub(p1_digital.multiplyScalar(model.scale.x));
+        }
+
+        function render() {
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>

@@ -1,30 +1,29 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-    <title>AR BIM - Mirino di Precisione</title>
+    <title>AR BIM - Fix Camera</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
-        body { margin: 0; overflow: hidden; font-family: sans-serif; background: #000; color: white; }
+        body { margin: 0; overflow: hidden; font-family: sans-serif; }
         #status-panel { 
             position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
             width: 80%; text-align: center; z-index: 1000; 
-            background: rgba(0,0,0,0.8); padding: 15px; border-radius: 10px;
+            background: rgba(0,0,0,0.7); color: white; padding: 10px; border-radius: 8px;
         }
-        #ui-container { position: absolute; bottom: 30px; width: 100%; text-align: center; z-index: 1000; }
-        .btn { 
-            background: #28a745; color: white; border: none; padding: 20px; 
-            border-radius: 10px; font-weight: bold; font-size: 16px; display: none;
+        #ui-container { position: absolute; bottom: 100px; width: 100%; text-align: center; z-index: 1000; }
+        .btn-ui { 
+            background: #28a745; color: white; border: none; padding: 15px 25px; 
+            border-radius: 8px; font-weight: bold; margin: 5px; display: none;
         }
     </style>
 </head>
 <body>
-    <div id="status-panel"><div id="status-text">Caricamento...</div></div>
+    <div id="status-panel"><div id="status-text">Caricamento Modello...</div></div>
     
     <div id="ui-container">
-        <button id="btn-ar" class="btn">ENTRA IN AR</button>
-        <button id="btn-p1" class="btn">FISSA PUNTO 1 (QR1)</button>
-        <button id="btn-p2" class="btn">FISSA PUNTO 2 (QR2)</button>
+        <button id="btn-p1" class="btn-ui">FISSA PUNTO 1 (QR1)</button>
+        <button id="btn-p2" class="btn-ui">FISSA PUNTO 2 (QR2)</button>
     </div>
 
     <script type="importmap">
@@ -50,34 +49,37 @@
         let p1_real = null, p2_real = null;
 
         const statusText = document.getElementById('status-text');
-        const btnAR = document.getElementById('btn-ar');
         const btnP1 = document.getElementById('btn-p1');
         const btnP2 = document.getElementById('btn-p2');
 
         init();
 
-        async function init() {
+        function init() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 100);
+
+            // IMPORTANTE: alpha true e premultipliedAlpha false per evitare lo schermo nero
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
             document.body.appendChild(renderer.domElement);
 
-            // Luce
+            // AGGIUNGI IL BOTTONE UFFICIALE (Gestisce lui la sessione AR correttamente)
+            document.body.appendChild(ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] }));
+
             scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1));
 
-            // 1. MIRINO (Il cerchietto che segue il pavimento)
+            // Mirino (Reticle)
             reticle = new THREE.Mesh(
-                new THREE.RingGeometry(0.08, 0.1, 32).rotateX(-Math.PI / 2),
+                new THREE.RingGeometry(0.1, 0.12, 32).rotateX(-Math.PI / 2),
                 new THREE.MeshBasicMaterial({ color: 0x00ff00 })
             );
             reticle.matrixAutoUpdate = false;
             reticle.visible = false;
             scene.add(reticle);
 
-            // 2. CARICA MODELLO
+            // Caricamento modello
             const loader = new GLTFLoader();
             loader.load('./modello.glb', (gltf) => {
                 model = gltf.scene;
@@ -87,27 +89,21 @@
                 });
                 model.visible = false;
                 scene.add(model);
-                statusText.innerText = "Modello Pronto. Clicca ENTRA IN AR.";
-                btnAR.style.display = 'inline-block';
+                statusText.innerText = "Modello caricato. Clicca 'START AR'";
             });
 
-            btnAR.onclick = () => {
-                navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['hit-test'] })
-                .then(s => {
-                    renderer.xr.setSession(s);
-                    btnAR.style.display = 'none';
-                    btnP1.style.display = 'inline-block';
-                    statusText.innerText = "Punta il mirino sul QR 1";
-                });
-            };
+            // Gestione eventi sessione
+            renderer.xr.addEventListener('sessionstart', () => {
+                btnP1.style.display = 'inline-block';
+                statusText.innerText = "Muovi il telefono per trovare il pavimento";
+            });
 
-            // 3. LOGICA PULSANTI FISSA
             btnP1.onclick = () => {
                 if (reticle.visible) {
                     p1_real = new THREE.Vector3().setFromMatrixPosition(reticle.matrix);
                     btnP1.style.display = 'none';
                     btnP2.style.display = 'inline-block';
-                    statusText.innerText = "Punto 1 OK. Punta il mirino sul QR 2";
+                    statusText.innerText = "QR1 fissato. Vai al QR2";
                 }
             };
 
@@ -116,8 +112,8 @@
                     p2_real = new THREE.Vector3().setFromMatrixPosition(reticle.matrix);
                     calibrate();
                     btnP2.style.display = 'none';
-                    statusText.innerText = "Allineamento Completato!";
-                    reticle.visible = false; // Nascondi il mirino alla fine
+                    statusText.innerText = "Allineato!";
+                    reticle.visible = false;
                 }
             };
 
@@ -141,8 +137,8 @@
 
         function render(timestamp, frame) {
             if (frame) {
-                const referenceSpace = renderer.xr.getReferenceSpace();
                 const session = renderer.xr.getSession();
+                const referenceSpace = renderer.xr.getReferenceSpace();
 
                 if (hitTestSourceRequested === false) {
                     session.requestReferenceSpace('viewer').then(refSpace => {

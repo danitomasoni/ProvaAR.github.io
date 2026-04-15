@@ -1,29 +1,64 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-    <title>AR BIM - Fix Camera</title>
+    <title>BIM AR - Allineamento Definitivo</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
         body { margin: 0; overflow: hidden; font-family: sans-serif; }
-        #status-panel { 
-            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
-            width: 80%; text-align: center; z-index: 1000; 
-            background: rgba(0,0,0,0.7); color: white; padding: 10px; border-radius: 8px;
+        
+        /* Pannello UI che rimarrà visibile in AR */
+        #ui-container { 
+            position: absolute; 
+            bottom: 50px; 
+            width: 100%; 
+            text-align: center; 
+            z-index: 9999; /* Altissimo */
+            pointer-events: auto;
         }
-        #ui-container { position: absolute; bottom: 100px; width: 100%; text-align: center; z-index: 1000; }
+
+        #status-panel { 
+            position: absolute; 
+            top: 20px; 
+            left: 50%; 
+            transform: translateX(-50%);
+            width: 80%; 
+            text-align: center; 
+            z-index: 9999;
+            background: rgba(0,0,0,0.7); 
+            color: white; 
+            padding: 10px; 
+            border-radius: 8px;
+            pointer-events: none;
+        }
+
         .btn-ui { 
-            background: #28a745; color: white; border: none; padding: 15px 25px; 
-            border-radius: 8px; font-weight: bold; margin: 5px; display: none;
+            background: #28a745; 
+            color: white; 
+            border: 2px solid white; 
+            padding: 20px 30px; 
+            border-radius: 12px; 
+            font-weight: bold; 
+            font-size: 18px; 
+            margin: 10px; 
+            display: none; /* Inizialmente nascosti */
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        }
+        
+        /* Stile per il bottone AR standard di Three.js */
+        #ARButton {
+            bottom: 20px !important;
         }
     </style>
 </head>
 <body>
-    <div id="status-panel"><div id="status-text">Caricamento Modello...</div></div>
-    
-    <div id="ui-container">
-        <button id="btn-p1" class="btn-ui">FISSA PUNTO 1 (QR1)</button>
-        <button id="btn-p2" class="btn-ui">FISSA PUNTO 2 (QR2)</button>
+    <div id="ar-overlay">
+        <div id="status-panel"><div id="status-text">Caricamento Modello...</div></div>
+        
+        <div id="ui-container">
+            <button id="btn-p1" class="btn-ui">FISSA PUNTO 1 (QR1)</button>
+            <button id="btn-p2" class="btn-ui">FISSA PUNTO 2 (QR2)</button>
+        </div>
     </div>
 
     <script type="importmap">
@@ -51,6 +86,7 @@
         const statusText = document.getElementById('status-text');
         const btnP1 = document.getElementById('btn-p1');
         const btnP2 = document.getElementById('btn-p2');
+        const overlay = document.getElementById('ar-overlay');
 
         init();
 
@@ -58,19 +94,23 @@
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 100);
 
-            // IMPORTANTE: alpha true e premultipliedAlpha false per evitare lo schermo nero
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
             document.body.appendChild(renderer.domElement);
 
-            // AGGIUNGI IL BOTTONE UFFICIALE (Gestisce lui la sessione AR correttamente)
-            document.body.appendChild(ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] }));
+            // CONFIGURAZIONE FONDAMENTALE PER VEDERE I TASTI
+            const options = {
+                requiredFeatures: ['hit-test'],
+                optionalFeatures: ['dom-overlay'],
+                domOverlay: { root: overlay } // Diciamo all'AR di tenere visibile questo div
+            };
+            document.body.appendChild(ARButton.createButton(renderer, options));
 
             scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1));
 
-            // Mirino (Reticle)
+            // Mirino
             reticle = new THREE.Mesh(
                 new THREE.RingGeometry(0.1, 0.12, 32).rotateX(-Math.PI / 2),
                 new THREE.MeshBasicMaterial({ color: 0x00ff00 })
@@ -79,7 +119,6 @@
             reticle.visible = false;
             scene.add(reticle);
 
-            // Caricamento modello
             const loader = new GLTFLoader();
             loader.load('./modello.glb', (gltf) => {
                 model = gltf.scene;
@@ -89,10 +128,9 @@
                 });
                 model.visible = false;
                 scene.add(model);
-                statusText.innerText = "Modello caricato. Clicca 'START AR'";
+                statusText.innerText = "Modello caricato. Clicca START AR";
             });
 
-            // Gestione eventi sessione
             renderer.xr.addEventListener('sessionstart', () => {
                 btnP1.style.display = 'inline-block';
                 statusText.innerText = "Muovi il telefono per trovare il pavimento";
@@ -139,14 +177,12 @@
             if (frame) {
                 const session = renderer.xr.getSession();
                 const referenceSpace = renderer.xr.getReferenceSpace();
-
                 if (hitTestSourceRequested === false) {
                     session.requestReferenceSpace('viewer').then(refSpace => {
                         session.requestHitTestSource({ space: refSpace }).then(source => hitTestSource = source);
                     });
                     hitTestSourceRequested = true;
                 }
-
                 if (hitTestSource) {
                     const hitTestResults = frame.getHitTestResults(hitTestSource);
                     if (hitTestResults.length) {

@@ -1,189 +1,154 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-    <title>AR BIM Alignment - Danitomasoni</title>
+    <title>AR BIM Alignment - S26 Ultra Fix</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
-        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #000; }
-        #ui-container { position: absolute; bottom: 40px; left: 0; width: 100%; text-align: center; z-index: 100; }
-        .btn { 
-            background: #007bff; color: white; border: none; padding: 18px 35px; 
-            border-radius: 50px; font-weight: bold; font-size: 18px; margin: 10px; 
-            box-shadow: 0 4px 15px rgba(0,0,0,0.5); display: none; 
-        }
+        body { margin: 0; overflow: hidden; font-family: sans-serif; background-color: #000; color: white; }
         #status-panel { 
             position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
-            width: 80%; text-align: center; color: white; z-index: 100; 
-            background: rgba(0,0,0,0.6); padding: 15px; border-radius: 10px;
-            text-shadow: 1px 1px 2px #000; border: 1px solid rgba(255,255,255,0.2);
+            width: 85%; text-align: center; z-index: 1000; 
+            background: rgba(0,0,0,0.8); padding: 20px; border-radius: 15px;
+            border: 1px solid #444;
         }
-        #debug-log {
-            position: absolute; top: 120px; left: 10px; color: #0f0; font-size: 12px;
-            pointer-events: none; z-index: 90; font-family: monospace;
+        #ui-container { position: absolute; bottom: 50px; width: 100%; text-align: center; z-index: 1000; }
+        .btn { 
+            background: #007bff; color: white; border: none; padding: 20px 40px; 
+            border-radius: 50px; font-weight: bold; font-size: 18px; display: none;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
         }
+        #error-log { color: #ff5555; font-size: 12px; margin-top: 10px; text-align: left; }
     </style>
 </head>
 <body>
     <div id="status-panel">
-        <div id="status-text">Inizializzazione sistema...</div>
-        <div id="progress-bar" style="width:0%; height:4px; background:#28a745; margin-top:10px; transition: width 0.3s;"></div>
+        <div id="status-text">Attendere: Avvio Script...</div>
+        <div id="error-log"></div>
     </div>
     
-    <div id="debug-log"></div>
-
     <div id="ui-container">
         <button id="btn-ar" class="btn">AVVIA REALTÀ AUMENTATA</button>
-        <button id="btn-p2" class="btn">FISSA PUNTO 2 (SUL 2° QR)</button>
+        <button id="btn-p2" class="btn">FISSA PUNTO 2</button>
     </div>
 
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.150.1/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.150.1/examples/jsm/"
+            }
+        }
+    </script>
+
     <script type="module">
-        import { ARButton } from 'https://unpkg.com/three@0.128.0/examples/jsm/webxr/ARButton.js';
-        import { GLTFLoader } from 'https://unpkg.com/three@0.128.0/examples/jsm/loaders/GLTFLoader.js';
+        import * as THREE from 'three';
+        import { ARButton } from 'three/addons/webxr/ARButton.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        const statusText = document.getElementById('status-text');
+        const errorLog = document.getElementById('error-log');
+        const btnAR = document.getElementById('btn-ar');
+        const btnP2 = document.getElementById('btn-p2');
+
+        function reportError(msg) {
+            statusText.innerText = "ERRORE";
+            errorLog.innerHTML += "> " + msg + "<br>";
+            console.error(msg);
+        }
+
+        // Intercettiamo errori globali per vederli sul Samsung
+        window.onerror = (m) => reportError("JS: " + m);
 
         let scene, camera, renderer, model;
         let p1_digital = new THREE.Vector3();
         let p2_digital = new THREE.Vector3();
-        let p1_real = new THREE.Vector3(0, 0, 0); 
-        let p2_real = null;
+        let p1_real = new THREE.Vector3(0, 0, 0);
 
-        const statusText = document.getElementById('status-text');
-        const progressBar = document.getElementById('progress-bar');
-        const btnAR = document.getElementById('btn-ar');
-        const btnP2 = document.getElementById('btn-p2');
-        const debugLog = document.getElementById('debug-log');
+        async function init() {
+            try {
+                statusText.innerText = "Creazione Scena 3D...";
+                
+                scene = new THREE.Scene();
+                camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 100);
+                
+                renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+                renderer.setPixelRatio(window.devicePixelRatio);
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                renderer.xr.enabled = true;
+                document.body.appendChild(renderer.domElement);
 
-        function log(msg) {
-            console.log(msg);
-            debugLog.innerHTML += msg + "<br>";
-        }
+                scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1));
+                scene.add(new THREE.AmbientLight(0x404040));
 
-        init();
+                statusText.innerText = "Download Modello GLB...";
+                const loader = new GLTFLoader();
+                
+                loader.load('./modello.glb', 
+                    (gltf) => {
+                        model = gltf.scene;
+                        
+                        // Analisi punti
+                        model.traverse((child) => {
+                            if (child.name.includes('QR_CODE1')) child.getWorldPosition(p1_digital);
+                            if (child.name.includes('QR_CODE2')) child.getWorldPosition(p2_digital);
+                        });
 
-        function init() {
-            scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 100);
-            
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-            renderer.setPixelRatio(window.devicePixelRatio);
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.xr.enabled = true;
-            document.body.appendChild(renderer.domElement);
+                        scene.add(model);
+                        model.visible = false;
+                        
+                        statusText.innerText = "Modello Caricato! Pronto per AR.";
+                        btnAR.style.display = 'inline-block';
+                    },
+                    (xhr) => {
+                        const p = Math.round((xhr.loaded / xhr.total) * 100);
+                        statusText.innerText = "Scaricamento: " + p + "%";
+                    },
+                    (err) => reportError("Caricamento fallito: " + err)
+                );
 
-            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
-            scene.add(light);
-            scene.add(new THREE.AmbientLight(0x404040));
+                btnAR.onclick = () => {
+                    navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['local-floor'] })
+                        .then(onSessionStarted)
+                        .catch(err => reportError("Impossibile avviare AR: " + err));
+                };
 
-            // CARICAMENTO MODELLO CON MONITORAGGIO
-            log("Avvio download modello...");
-            const loader = new GLTFLoader();
-            
-            loader.load('modello.glb', 
-                // Successo
-                (gltf) => {
-                    model = gltf.scene;
-                    log("Modello scaricato. Analisi oggetti...");
-                    
-                    let found1 = false, found2 = false;
-                    model.traverse((child) => {
-                        if (child.name.includes('QR_CODE1')) {
-                            child.getWorldPosition(p1_digital);
-                            found1 = true;
-                            log("Trovato: QR_CODE1 a " + JSON.stringify(p1_digital));
-                        }
-                        if (child.name.includes('QR_CODE2')) {
-                            child.getWorldPosition(p2_digital);
-                            found2 = true;
-                            log("Trovato: QR_CODE2 a " + JSON.stringify(p2_digital));
-                        }
-                    });
+                btnP2.onclick = () => {
+                    const p2_real = new THREE.Vector3();
+                    camera.getWorldPosition(p2_real);
+                    calibrate(p2_real);
+                    btnP2.innerText = "ALLINEATO ✅";
+                };
 
-                    model.visible = false;
-                    scene.add(model);
-                    
-                    if (found1 && found2) {
-                        statusText.innerText = "Modello Pronto! Vai sul QR 1.";
-                        progressBar.style.width = "100%";
-                    } else {
-                        statusText.innerText = "Attenzione: Cubi QR non trovati nel file!";
-                        log("ERRORE: Assicurati che i cubi si chiamino QR_CODE1 e QR_CODE2");
-                    }
-                    btnAR.style.display = 'inline-block';
-                },
-                // Progresso
-                (xhr) => {
-                    if (xhr.lengthComputable) {
-                        const percent = (xhr.loaded / xhr.total) * 100;
-                        progressBar.style.width = percent + "%";
-                        statusText.innerText = "Caricamento: " + Math.round(percent) + "%";
-                    }
-                },
-                // Errore
-                (error) => {
-                    log("ERRORE CARICAMENTO: " + error.message);
-                    statusText.innerText = "Errore nel caricamento del file .glb";
-                }
-            );
-
-            btnAR.addEventListener('click', () => {
-                navigator.xr.requestSession('immersive-ar', { 
-                    requiredFeatures: ['local-floor'] 
-                }).then(onSessionStarted);
-            });
-
-            btnP2.addEventListener('click', () => {
-                // Usiamo la posizione attuale della camera (il telefono) come Punto 2 reale
-                p2_real = new THREE.Vector3();
-                camera.getWorldPosition(p2_real);
-                log("Punto 2 fissato a: " + JSON.stringify(p2_real));
-                calibrate();
-                btnP2.innerText = "ALLINEATO ✅";
-                btnP2.style.background = "#28a745";
-            });
+            } catch (e) {
+                reportError("Crash Init: " + e.message);
+            }
         }
 
         function onSessionStarted(session) {
             renderer.xr.setSession(session);
             btnAR.style.display = 'none';
             btnP2.style.display = 'inline-block';
-            statusText.innerText = "Sei sul QR1. Cammina verso il QR2 e premi il tasto.";
-            
-            // Fissiamo il punto 1 reale come l'origine dell'AR (dove ti trovi ora)
-            p1_real.set(0, 0, 0); 
+            statusText.innerText = "Punto 1 impostato. Vai al Punto 2.";
             model.visible = true;
-            renderer.setAnimationLoop(render);
+            renderer.setAnimationLoop(() => renderer.render(scene, camera));
         }
 
-        function calibrate() {
-            if (!model || !p2_real) return;
-
-            // 1. CALCOLO SCALA
+        function calibrate(p2_real) {
             const d_dig = p1_digital.distanceTo(p2_digital);
             const d_real = p1_real.distanceTo(p2_real);
             const s = d_real / d_dig;
             model.scale.setScalar(s);
-            log("Scala applicata: " + s.toFixed(3));
 
-            // 2. CALCOLO ROTAZIONE (solo asse Y)
             const v_dig = new THREE.Vector3().subVectors(p2_digital, p1_digital).normalize();
             const v_real = new THREE.Vector3().subVectors(p2_real, p1_real).normalize();
-            
-            const angleDig = Math.atan2(v_dig.x, v_dig.z);
-            const angleReal = Math.atan2(v_real.x, v_real.z);
-            model.rotation.y = angleReal - angleDig;
+            model.rotation.y = Math.atan2(v_real.x, v_real.z) - Math.atan2(v_dig.x, v_dig.z);
 
-            // 3. POSIZIONAMENTO
-            // Spostiamo il modello in modo che il suo QR_CODE1 coincida con lo zero reale
             const offset = p1_digital.clone().multiplyScalar(s).applyQuaternion(model.quaternion);
             model.position.copy(p1_real).sub(offset);
-            
-            statusText.innerText = "Allineamento Completato!";
         }
 
-        function render() {
-            renderer.render(scene, camera);
-        }
+        init();
     </script>
 </body>
 </html>

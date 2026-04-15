@@ -1,49 +1,55 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-    <title>BIM AR - S26 Ultra Precision</title>
+    <title>BIM AR PRO - S26 Ultra</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
-        body { margin: 0; overflow: hidden; font-family: sans-serif; }
-        #ar-overlay { 
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
-            display: none; pointer-events: none; z-index: 10;
-        }
+        body { margin: 0; overflow: hidden; font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: #000; }
+        
+        /* Overlay per AR */
+        #ar-overlay { width: 100%; height: 100%; pointer-events: none; }
+        
         #status-panel { 
             position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
-            width: 80%; text-align: center; background: rgba(0,0,0,0.8); 
-            color: white; padding: 15px; border-radius: 12px; pointer-events: none;
+            width: 85%; background: rgba(0,0,0,0.8); color: #fff; 
+            padding: 15px; border-radius: 15px; text-align: center;
+            z-index: 10; border: 1px solid #444; pointer-events: none;
         }
-        #ui-container { 
-            position: absolute; bottom: 60px; width: 100%; text-align: center; 
-            pointer-events: none;
+
+        #ui-controls { 
+            position: absolute; bottom: 80px; width: 100%; 
+            text-align: center; pointer-events: none; z-index: 10;
         }
-        .btn-ui { 
-            background: #28a745; color: white; border: 2px solid white; 
-            padding: 20px 30px; border-radius: 15px; font-weight: bold; 
-            font-size: 18px; pointer-events: auto; /* IMPORTANTE */
-            display: inline-block; margin: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+
+        .btn { 
+            background: #28a745; color: white; border: 2px solid #fff; 
+            padding: 22px 35px; border-radius: 18px; font-weight: bold; 
+            font-size: 18px; pointer-events: auto; display: none;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.4);
         }
-        .btn-ui:active { background: #1e7e34; transform: scale(0.95); }
+
+        .btn:active { background: #1e7e34; transform: scale(0.95); }
     </style>
 </head>
 <body>
+
     <div id="ar-overlay">
         <div id="status-panel">
-            <div id="status-text">Inquadra il pavimento e muovi il telefono...</div>
+            <b id="status-text">Inizializzazione...</b>
+            <div id="sub-status" style="font-size: 12px; margin-top: 5px; opacity: 0.8;">Caricamento librerie</div>
         </div>
-        <div id="ui-container">
-            <button id="btn-p1" class="btn-ui">FISSA PUNTO 1 (QR1)</button>
-            <button id="btn-p2" class="btn-ui" style="display:none;">FISSA PUNTO 2 (QR2)</button>
+        <div id="ui-controls">
+            <button id="btn-p1" class="btn">FISSA PUNTO 1 (QR1)</button>
+            <button id="btn-p2" class="btn">FISSA PUNTO 2 (QR2)</button>
         </div>
     </div>
 
     <script type="importmap">
         {
             "imports": {
-                "three": "https://unpkg.com/three@0.150.1/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.150.1/examples/jsm/"
+                "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.157.0/examples/jsm/"
             }
         }
     </script>
@@ -62,74 +68,97 @@
         let p1_real = null, p2_real = null;
 
         const statusText = document.getElementById('status-text');
+        const subStatus = document.getElementById('sub-status');
         const btnP1 = document.getElementById('btn-p1');
         const btnP2 = document.getElementById('btn-p2');
         const overlay = document.getElementById('ar-overlay');
 
         init();
 
-        function init() {
+        async function init() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 100);
-
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
             document.body.appendChild(renderer.domElement);
 
-            const arButton = ARButton.createButton(renderer, {
+            // Attivazione AR con Overlay
+            const arBtn = ARButton.createButton(renderer, {
                 requiredFeatures: ['hit-test'],
                 optionalFeatures: ['dom-overlay'],
                 domOverlay: { root: overlay }
             });
-            document.body.appendChild(arButton);
+            document.body.appendChild(arBtn);
 
+            // Luci
             scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1));
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(0, 10, 0);
+            scene.add(directionalLight);
 
-            // Mirino più visibile (Giallo acceso)
+            // Mirino (Giallo Fluorescente per massima visibilità)
             reticle = new THREE.Mesh(
-                new THREE.RingGeometry(0.08, 0.1, 32).rotateX(-Math.PI / 2),
-                new THREE.MeshBasicMaterial({ color: 0xffff00 })
+                new THREE.RingGeometry(0.08, 0.11, 32).rotateX(-Math.PI / 2),
+                new THREE.MeshBasicMaterial({ color: 0xccff00 })
             );
             reticle.matrixAutoUpdate = false;
             reticle.visible = false;
             scene.add(reticle);
 
-            new GLTFLoader().load('./modello.glb', (gltf) => {
+            // CARICAMENTO MODELLO CON TRUCCO ANTI-CACHE
+            // Aggiungiamo ?v=Timestamp per forzare Chrome a scaricare sempre l'ultima versione
+            const modelPath = './modello.glb?v=' + new Date().getTime();
+            subStatus.innerText = "Scaricamento modello...";
+
+            new GLTFLoader().load(modelPath, (gltf) => {
                 model = gltf.scene;
+                let found1 = false, found2 = false;
+                
                 model.traverse(c => {
-                    if (c.name.includes('QR_CODE1')) c.getWorldPosition(p1_digital);
-                    if (c.name.includes('QR_CODE2')) c.getWorldPosition(p2_digital);
+                    if (c.name === 'QR_CODE1') { c.getWorldPosition(p1_digital); found1 = true; }
+                    if (c.name === 'QR_CODE2') { c.getWorldPosition(p2_digital); found2 = true; }
                 });
+
                 model.visible = false;
                 scene.add(model);
-                statusText.innerText = "Modello Caricato. Clicca START AR";
+                
+                statusText.innerText = "MODELLO CARICATO";
+                subStatus.innerText = (found1 && found2) ? "Punti QR rilevati correttamente" : "ERRORE: QR_CODE non trovati nel file";
+            }, (xhr) => {
+                const p = Math.round(xhr.loaded / xhr.total * 100);
+                subStatus.innerText = `Download: ${p}%`;
             });
 
+            // Gestione Sessione
             renderer.xr.addEventListener('sessionstart', () => {
                 overlay.style.display = 'block';
+                btnP1.style.display = 'inline-block';
+                statusText.innerText = "AR ATTIVA";
+                subStatus.innerText = "Muovi il telefono lateralmente per mappare il suolo";
             });
 
-            btnP1.onclick = (e) => {
-                e.preventDefault();
+            // Logica Pulsanti
+            btnP1.onclick = () => {
                 if (reticle.visible) {
                     p1_real = new THREE.Vector3().setFromMatrixPosition(reticle.matrix);
                     btnP1.style.display = 'none';
                     btnP2.style.display = 'inline-block';
-                    statusText.innerText = "Punto 1 Salvato! Vai al QR 2";
-                } else {
-                    statusText.innerText = "ERRORE: Pavimento non rilevato. Muovi il telefono!";
+                    statusText.innerText = "PUNTO 1 OK";
+                    subStatus.innerText = "Ora punta il mirino sul secondo QR";
                 }
             };
 
-            btnP2.onclick = (e) => {
-                e.preventDefault();
+            btnP2.onclick = () => {
                 if (reticle.visible) {
                     p2_real = new THREE.Vector3().setFromMatrixPosition(reticle.matrix);
                     calibrate();
                     btnP2.style.display = 'none';
-                    statusText.innerText = "ALLINEATO CON SUCCESSO!";
+                    statusText.innerText = "ALLINEAMENTO COMPLETATO";
+                    subStatus.innerText = "Il modello è ora sovrapposto alla realtà";
+                    reticle.visible = false;
                 }
             };
 
@@ -137,17 +166,24 @@
         }
 
         function calibrate() {
-            const d_dig = p1_digital.distanceTo(p2_digital);
-            const d_real = p1_real.distanceTo(p2_real);
-            const s = d_real / d_dig;
-            model.scale.setScalar(s);
+            if (!p1_real || !p2_real) return;
 
-            const v_dig = new THREE.Vector3().subVectors(p2_digital, p1_digital).normalize();
-            const v_real = new THREE.Vector3().subVectors(p2_real, p1_real).normalize();
-            model.rotation.y = Math.atan2(v_real.x, v_real.z) - Math.atan2(v_dig.x, v_dig.z);
+            // Scala
+            const distDig = p1_digital.distanceTo(p2_digital);
+            const distReal = p1_real.distanceTo(p2_real);
+            const scale = distReal / distDig;
+            model.scale.setScalar(scale);
 
-            const offset = p1_digital.clone().multiplyScalar(s).applyQuaternion(model.quaternion);
+            // Rotazione
+            const dirDig = new THREE.Vector3().subVectors(p2_digital, p1_digital).normalize();
+            const dirReal = new THREE.Vector3().subVectors(p2_real, p1_real).normalize();
+            const angle = Math.atan2(dirReal.x, dirReal.z) - Math.atan2(dirDig.x, dirDig.z);
+            model.rotation.y = angle;
+
+            // Posizionamento
+            const offset = p1_digital.clone().multiplyScalar(scale).applyQuaternion(model.quaternion);
             model.position.copy(p1_real).sub(offset);
+            
             model.visible = true;
         }
 
@@ -155,19 +191,20 @@
             if (frame) {
                 const session = renderer.xr.getSession();
                 const referenceSpace = renderer.xr.getReferenceSpace();
+
                 if (!hitTestSourceRequested) {
                     session.requestReferenceSpace('viewer').then(refSpace => {
                         session.requestHitTestSource({ space: refSpace }).then(source => hitTestSource = source);
                     });
                     hitTestSourceRequested = true;
                 }
+
                 if (hitTestSource) {
                     const hitTestResults = frame.getHitTestResults(hitTestSource);
                     if (hitTestResults.length > 0) {
                         const hit = hitTestResults[0];
                         reticle.visible = true;
                         reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
-                        if(p1_real == null) statusText.innerText = "Pavimento trovato! Clicca QR1";
                     } else {
                         reticle.visible = false;
                     }

@@ -1,58 +1,68 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-    <title>BIM AR PRO V2 - Ispezione & Sezioni</title>
+    <title>BIM AR PRO V3 - Trasparenza</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
         body { margin: 0; overflow: hidden; font-family: sans-serif; background: #000; }
         #ar-overlay { width: 100%; height: 100%; pointer-events: none; z-index: 10; }
         
-        /* Pannello Info Elemento */
+        #status-panel { 
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            width: 80%; text-align: center; z-index: 9999;
+            background: rgba(0,0,0,0.7); color: white; padding: 10px; border-radius: 8px;
+            pointer-events: none;
+        }
+
         #info-popup {
             position: absolute; top: 100px; left: 50%; transform: translateX(-50%);
             width: 80%; background: rgba(0,0,0,0.85); color: #fff; padding: 15px;
             border-radius: 12px; display: none; border: 1px solid #007bff; pointer-events: auto;
+            z-index: 9999;
         }
 
         #ui-controls { 
             position: absolute; bottom: 30px; width: 100%; text-align: center; 
-            pointer-events: none; 
+            pointer-events: none; z-index: 9999;
         }
 
         .btn { 
             background: #007bff; color: white; border: none; padding: 15px 25px; 
             border-radius: 12px; font-weight: bold; pointer-events: auto; margin: 5px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
         }
 
-        #section-container {
+        #opacity-container {
             position: absolute; bottom: 120px; left: 50%; transform: translateX(-50%);
             width: 80%; background: rgba(0,0,0,0.7); padding: 15px; border-radius: 50px;
-            display: none; pointer-events: auto; align-items: center;
+            display: none; pointer-events: auto; align-items: center; z-index: 9999;
         }
 
         input[type=range] { width: 100%; cursor: pointer; }
 
-        .btn-reset { background: #dc3545; }
+        .btn-reset { background: #dc3545; margin-top: 10px; width: 100%; }
     </style>
 </head>
 <body>
 
     <div id="ar-overlay">
+        <div id="status-panel"><div id="status-text">Caricamento Modello...</div></div>
+
         <div id="info-popup">
-            <b id="el-name">Elemento</b><br>
-            <small id="el-data">Dati non disponibili</small><br><br>
-            <button class="btn btn-reset" onclick="resetSelection()">Chiudi / Reset</button>
+            <b id="el-name">Elemento</b><hr>
+            <div id="el-data" style="max-height: 200px; overflow-y: auto; font-size: 0.9em;"></div>
+            <button class="btn btn-reset" onclick="resetSelection()">CHIUDI</button>
         </div>
 
-        <div id="section-container">
-            <span style="color:white; margin-right:10px;">Sezione</span>
-            <input type="range" id="slider-clip" min="0" max="10" step="0.1" value="0">
+        <div id="opacity-container">
+            <span style="color:white; margin-right:15px; font-weight:bold; font-size: 0.8em;">OPACITÀ</span>
+            <input type="range" id="slider-opacity" min="0" max="1" step="0.01" value="1">
         </div>
 
         <div id="ui-controls">
-            <button id="btn-p1" class="btn" style="background:#28a745">FISSA PUNTO 1</button>
-            <button id="btn-p2" class="btn" style="background:#28a745; display:none;">FISSA PUNTO 2</button>
+            <button id="btn-p1" class="btn" style="background:#28a745">FISSA PUNTO 1 (QR1)</button>
+            <button id="btn-p2" class="btn" style="background:#28a745; display:none;">FISSA PUNTO 2 (QR2)</button>
         </div>
     </div>
 
@@ -76,13 +86,13 @@
         let p1_digital = new THREE.Vector3(), p2_digital = new THREE.Vector3();
         let p1_real = null, p2_real = null;
         
-        // Clipping & Selection
-        let localPlane, originalMaterials = new Map();
         let selectedObject = null;
+        let originalEmissive = new THREE.Color();
 
+        const statusText = document.getElementById('status-text');
         const infoPopup = document.getElementById('info-popup');
-        const sectionUI = document.getElementById('section-container');
-        const sliderClip = document.getElementById('slider-clip');
+        const opacityUI = document.getElementById('opacity-container');
+        const sliderOpacity = document.getElementById('slider-opacity');
         const btnP1 = document.getElementById('btn-p1');
         const btnP2 = document.getElementById('btn-p2');
 
@@ -96,11 +106,7 @@
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
-            renderer.localClippingEnabled = true; // ABILITA SEZIONI
             document.body.appendChild(renderer.domElement);
-
-            // Piano di sezione (inizialmente lontanissimo)
-            localPlane = new THREE.Plane(new THREE.Vector3(0, 0, -1), 100);
 
             const arBtn = ARButton.createButton(renderer, {
                 requiredFeatures: ['hit-test'],
@@ -110,7 +116,6 @@
             document.body.appendChild(arBtn);
 
             scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1));
-            
             raycaster = new THREE.Raycaster();
 
             // Mirino
@@ -122,38 +127,44 @@
             reticle.visible = false;
             scene.add(reticle);
 
-            // Caricamento
+            // Caricamento con Anti-Cache
             new GLTFLoader().load('./modello.glb?v=' + Date.now(), (gltf) => {
                 model = gltf.scene;
                 model.traverse(c => {
                     if (c.name === 'QR_CODE1') c.getWorldPosition(p1_digital);
                     if (c.name === 'QR_CODE2') c.getWorldPosition(p2_digital);
                     
-                    // Prepara i materiali per il clipping
                     if (c.isMesh) {
-                        c.material.clippingPlanes = [ localPlane ];
-                        c.material.clipShadows = true;
-                        c.material.side = THREE.DoubleSide; // Per vedere l'interno dei muri tagliati
+                        // Prepariamo tutti i materiali per la trasparenza
+                        c.material.transparent = true;
+                        c.material.opacity = 1.0;
                     }
                 });
                 model.visible = false;
                 scene.add(model);
+                statusText.innerText = "Modello caricato. START AR";
             });
 
-            // Evento Click/Touch per selezione
+            // Input Slider Trasparenza
+            sliderOpacity.oninput = () => {
+                const alpha = parseFloat(sliderOpacity.value);
+                model.traverse(c => {
+                    if (c.isMesh) c.material.opacity = alpha;
+                });
+            };
+
+            // Selezione
             window.addEventListener('click', onSelect);
 
-            // Gestione pulsanti punti
-            btnP1.onclick = () => { if(reticle.visible) { p1_real = new THREE.Vector3().setFromMatrixPosition(reticle.matrix); btnP1.style.display='none'; btnP2.style.display='inline-block'; }};
-            btnP2.onclick = () => { if(reticle.visible) { p2_real = new THREE.Vector3().setFromMatrixPosition(reticle.matrix); calibrate(); btnP2.style.display='none'; sectionUI.style.display='flex'; }};
+            btnP1.onclick = () => { if(reticle.visible) { p1_real = new THREE.Vector3().setFromMatrixPosition(reticle.matrix); btnP1.style.display='none'; btnP2.style.display='inline-block'; statusText.innerText="QR1 OK. Vai al QR2"; }};
+            btnP2.onclick = () => { if(reticle.visible) { p2_real = new THREE.Vector3().setFromMatrixPosition(reticle.matrix); calibrate(); btnP2.style.display='none'; opacityUI.style.display='flex'; statusText.innerText="Allineato!"; }};
 
             renderer.setAnimationLoop(render);
         }
 
         function onSelect(event) {
-            if (!model.visible) return;
+            if (!model || !model.visible) return;
             
-            // Coordinate mouse/touch
             const mouse = new THREE.Vector2(
                 (event.clientX / window.innerWidth) * 2 - 1,
                 -(event.clientY / window.innerHeight) * 2 + 1
@@ -164,60 +175,36 @@
 
             if (intersects.length > 0) {
                 const target = intersects[0].object;
-                highlightObject(target);
+                if (selectedObject) resetSelection();
+                
+                selectedObject = target;
+                if(selectedObject.material.emissive) {
+                    originalEmissive.copy(selectedObject.material.emissive);
+                    selectedObject.material.emissive.setHex(0x333300); // Evidenziazione
+                }
+                
                 showPopup(target);
             }
         }
 
-        function highlightObject(obj) {
-            resetSelection(); // Pulisce vecchia selezione
-            selectedObject = obj;
-            
-            // Salva originale e colora di giallo trasparente
-            if (!originalMaterials.has(obj.uuid)) {
-                originalMaterials.set(obj.uuid, { 
-                    color: obj.material.color.clone(),
-                    emissive: obj.material.emissive ? obj.material.emissive.clone() : new THREE.Color(0,0,0)
-                });
-            }
-            obj.material.emissive.setHex(0x555500); // Giallo soffuso
-        }
-
         window.resetSelection = function() {
-            if (selectedObject) {
-                const orig = originalMaterials.get(selectedObject.uuid);
-                selectedObject.material.emissive.copy(orig.emissive);
-                selectedObject = null;
+            if (selectedObject && selectedObject.material.emissive) {
+                selectedObject.material.emissive.copy(originalEmissive);
             }
+            selectedObject = null;
             infoPopup.style.display = 'none';
         }
 
         function showPopup(obj) {
-            document.getElementById('el-name').innerText = obj.name || "Elemento BIM";
-            // Estrae dati se presenti (es. dall'IFC)
+            document.getElementById('el-name').innerText = obj.name || "Elemento";
             let dataStr = "";
             if(obj.userData) {
                 for (const [key, value] of Object.entries(obj.userData)) {
                     if(typeof value !== 'object') dataStr += `<b>${key}:</b> ${value}<br>`;
                 }
             }
-            document.getElementById('el-data').innerHTML = dataStr || "Nessun metadato trovato.";
+            document.getElementById('el-data').innerHTML = dataStr || "Nessun metadato.";
             infoPopup.style.display = 'block';
-        }
-
-        function updateClipping() {
-            const dist = parseFloat(sliderClip.value);
-            if (dist === 0) {
-                localPlane.constant = 100; // Piano rimosso
-            } else {
-                // Posiziona il piano davanti alla camera
-                const cameraDir = new THREE.Vector3();
-                camera.getWorldDirection(cameraDir);
-                localPlane.normal.copy(cameraDir).negate();
-                
-                // La costante è la distanza lungo la normale
-                localPlane.constant = - (camera.position.dot(localPlane.normal) + dist);
-            }
         }
 
         function calibrate() {
@@ -249,7 +236,6 @@
                         reticle.visible = false;
                     }
                 }
-                updateClipping();
             }
             renderer.render(scene, camera);
         }

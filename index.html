@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-    <title>BIM AR PRO V3 - Trasparenza</title>
+    <title>BIM AR PRO V3.1 - Grey Default</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
@@ -115,10 +115,14 @@
             });
             document.body.appendChild(arBtn);
 
-            scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1));
+            // Luci potenziate per il grigio
+            scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.5));
+            const light = new THREE.DirectionalLight(0xffffff, 0.5);
+            light.position.set(1, 1, 1);
+            scene.add(light);
+
             raycaster = new THREE.Raycaster();
 
-            // Mirino
             reticle = new THREE.Mesh(
                 new THREE.RingGeometry(0.08, 0.11, 32).rotateX(-Math.PI / 2),
                 new THREE.MeshBasicMaterial({ color: 0xccff00 })
@@ -127,7 +131,16 @@
             reticle.visible = false;
             scene.add(reticle);
 
-            // Caricamento con Anti-Cache
+            // Definizione del materiale Grigio Standard
+            const defaultGreyMaterial = new THREE.MeshStandardMaterial({
+                color: 0xcccccc,      // Grigio chiaro
+                roughness: 0.7,       // Non lucido
+                metalness: 0.2,       // Poco metallico
+                transparent: true,    // Abilita trasparenza per slider
+                opacity: 1.0,
+                side: THREE.DoubleSide // Visibile da entrambi i lati
+            });
+
             new GLTFLoader().load('./modello.glb?v=' + Date.now(), (gltf) => {
                 model = gltf.scene;
                 model.traverse(c => {
@@ -135,17 +148,18 @@
                     if (c.name === 'QR_CODE2') c.getWorldPosition(p2_digital);
                     
                     if (c.isMesh) {
-                        // Prepariamo tutti i materiali per la trasparenza
-                        c.material.transparent = true;
-                        c.material.opacity = 1.0;
+                        // SOVRASCRIVI MATERIALE CON GRIGIO DEFAULT
+                        // Copiamo solo il nome per mantenere il riferimento se necessario
+                        const oldName = c.material.name;
+                        c.material = defaultGreyMaterial.clone(); 
+                        c.material.name = oldName;
                     }
                 });
                 model.visible = false;
                 scene.add(model);
-                statusText.innerText = "Modello caricato. START AR";
+                statusText.innerText = "Modello Grigio Caricato. START AR";
             });
 
-            // Input Slider Trasparenza
             sliderOpacity.oninput = () => {
                 const alpha = parseFloat(sliderOpacity.value);
                 model.traverse(c => {
@@ -153,7 +167,6 @@
                 });
             };
 
-            // Selezione
             window.addEventListener('click', onSelect);
 
             btnP1.onclick = () => { if(reticle.visible) { p1_real = new THREE.Vector3().setFromMatrixPosition(reticle.matrix); btnP1.style.display='none'; btnP2.style.display='inline-block'; statusText.innerText="QR1 OK. Vai al QR2"; }};
@@ -164,32 +177,23 @@
 
         function onSelect(event) {
             if (!model || !model.visible) return;
-            
-            const mouse = new THREE.Vector2(
-                (event.clientX / window.innerWidth) * 2 - 1,
-                -(event.clientY / window.innerHeight) * 2 + 1
-            );
-
+            const mouse = new THREE.Vector2((event.clientX / window.innerWidth) * 2 - 1, -(event.clientY / window.innerHeight) * 2 + 1);
             raycaster.setFromCamera(mouse, camera);
             const intersects = raycaster.intersectObjects(model.children, true);
-
             if (intersects.length > 0) {
                 const target = intersects[0].object;
                 if (selectedObject) resetSelection();
-                
                 selectedObject = target;
                 if(selectedObject.material.emissive) {
-                    originalEmissive.copy(selectedObject.material.emissive);
-                    selectedObject.material.emissive.setHex(0x333300); // Evidenziazione
+                    selectedObject.material.emissive.setHex(0xff0000); // Rosso per evidenziare sul grigio
                 }
-                
                 showPopup(target);
             }
         }
 
         window.resetSelection = function() {
             if (selectedObject && selectedObject.material.emissive) {
-                selectedObject.material.emissive.copy(originalEmissive);
+                selectedObject.material.emissive.setHex(0x000000);
             }
             selectedObject = null;
             infoPopup.style.display = 'none';

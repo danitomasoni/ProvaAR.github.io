@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-    <title>BIM AR PRO V4 - One-Point Alignment</title>
+    <title>BIM AR PRO V4.1 - Fix UI</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
@@ -17,9 +17,10 @@
 
         #info-popup {
             position: absolute; top: 100px; left: 50%; transform: translateX(-50%);
-            width: 80%; background: rgba(0,0,0,0.85); color: #fff; padding: 15px;
-            border-radius: 12px; display: none; border: 1px solid #007bff; pointer-events: auto;
-            z-index: 9999;
+            width: 80%; background: rgba(0,0,0,0.9); color: #fff; padding: 15px;
+            border-radius: 12px; display: none; border: 1px solid #007bff; 
+            pointer-events: auto; /* IMPORTANTE */
+            z-index: 10000;
         }
 
         #ui-controls { 
@@ -57,7 +58,8 @@
         <div id="info-popup">
             <b id="el-name">Elemento</b><hr>
             <div id="el-data" style="max-height: 200px; overflow-y: auto; font-size: 0.9em;"></div>
-            <button class="btn" style="background:#dc3545; width:100%;" onclick="resetSelection()">CHIUDI</button>
+            <button class="btn" style="background:#dc3545; width:100%;" 
+                    onclick="event.stopPropagation(); resetSelection();">CHIUDI</button>
         </div>
 
         <div id="controls-container">
@@ -71,7 +73,8 @@
                     <input type="range" id="slider-rotation" min="0" max="6.28" step="0.01" value="0">
                 </div>
             </div>
-            <button id="btn-confirm" class="btn" style="background:#28a745; width: 85%;">CONFERMA POSIZIONE</button>
+            <button id="btn-confirm" class="btn" style="background:#28a745; width: 85%;" 
+                    onclick="event.stopPropagation();">CONFERMA POSIZIONE</button>
         </div>
 
         <div id="ui-controls">
@@ -94,13 +97,9 @@
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
         let scene, camera, renderer, model, reticle, raycaster;
-        let hitTestSource = null;
-        let hitTestSourceRequested = false;
-        let p1_digital = new THREE.Vector3();
-        let p1_real = null;
-        
-        let selectedObject = null;
-        let originalEmissive = new THREE.Color();
+        let hitTestSource = null, hitTestSourceRequested = false;
+        let p1_digital = new THREE.Vector3(), p1_real = null;
+        let selectedObject = null, originalEmissive = new THREE.Color();
 
         const statusText = document.getElementById('status-text');
         const infoPopup = document.getElementById('info-popup');
@@ -116,7 +115,6 @@
         function init() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 100);
-            
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -132,7 +130,6 @@
             scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.5));
             raycaster = new THREE.Raycaster();
 
-            // Mirino
             reticle = new THREE.Mesh(
                 new THREE.RingGeometry(0.08, 0.11, 32).rotateX(-Math.PI / 2),
                 new THREE.MeshBasicMaterial({ color: 0xccff00 })
@@ -141,72 +138,75 @@
             reticle.visible = false;
             scene.add(reticle);
 
-            const greyMaterial = new THREE.MeshStandardMaterial({
-                color: 0xcccccc, roughness: 0.7, metalness: 0.2,
-                transparent: true, opacity: 1.0, side: THREE.DoubleSide
-            });
+            const greyMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.7, metalness: 0.2, transparent: true, opacity: 1.0, side: THREE.DoubleSide });
 
             new GLTFLoader().load('./modello.glb?v=' + Date.now(), (gltf) => {
                 model = gltf.scene;
                 model.traverse(c => {
                     if (c.name === 'QR_CODE1') c.getWorldPosition(p1_digital);
-                    if (c.isMesh) c.material = greyMaterial.clone();
+                    if (c.isMesh) c.material = greyMat.clone();
                 });
                 model.visible = false;
                 scene.add(model);
-                statusText.innerText = "Modello caricato. START AR";
+                statusText.innerText = "Modello pronto. START AR";
             });
 
-            // LOGICA SLIDER
             sliderOpacity.oninput = () => {
                 const alpha = parseFloat(sliderOpacity.value);
                 model.traverse(c => { if (c.isMesh) c.material.opacity = alpha; });
             };
 
             sliderRotation.oninput = () => {
-                // Ruota il modello attorno al pivot (Punto 1 digitale)
                 model.rotation.y = parseFloat(sliderRotation.value);
                 updateModelPosition();
             };
 
-            btnP1.onclick = () => {
+            btnP1.onclick = (e) => {
+                e.stopPropagation();
                 if(reticle.visible) {
                     p1_real = new THREE.Vector3().setFromMatrixPosition(reticle.matrix);
-                    
-                    // Applica posizione iniziale
                     updateModelPosition();
                     model.visible = true;
-                    
-                    // UI Management
                     btnP1.style.display = 'none';
                     controlsContainer.style.display = 'flex';
                     statusText.innerText = "Regola rotazione e conferma";
                 }
             };
 
-            btnConfirm.onclick = () => {
-                rowRotation.style.display = 'none'; // Scompare slider rotazione
-                btnConfirm.style.display = 'none';  // Scompare tasto conferma
+            btnConfirm.onclick = (e) => {
+                e.stopPropagation();
+                rowRotation.style.display = 'none';
+                btnConfirm.style.display = 'none';
                 statusText.innerText = "Allineamento fissato";
             };
 
+            // Listener globale con filtro per evitare click-through
             window.addEventListener('click', onSelect);
             renderer.setAnimationLoop(render);
         }
 
         function updateModelPosition() {
             if (!p1_real) return;
-            // Calcoliamo l'offset del punto 1 rispetto all'origine locale del modello
-            // e lo applichiamo considerando la rotazione attuale.
             const offset = p1_digital.clone().applyQuaternion(model.quaternion);
             model.position.copy(p1_real).sub(offset);
         }
 
         function onSelect(event) {
+            // FIX: Se il click avviene su un pulsante o un'area UI, interrompi la selezione 3D
+            if (event.target.tagName === 'BUTTON' || event.target.closest('.slider-card') || event.target.closest('#info-popup')) {
+                return;
+            }
+
             if (!model || !model.visible) return;
-            const mouse = new THREE.Vector2((event.clientX / window.innerWidth) * 2 - 1, -(event.clientY / window.innerHeight) * 2 + 1);
+
+            const mouse = new THREE.Vector2(
+                (event.clientX / window.innerWidth) * 2 - 1,
+                -(event.clientY / window.innerHeight) * 2 + 1
+            );
+
             raycaster.setFromCamera(mouse, camera);
             const intersects = raycaster.intersectObjects(model.children, true);
+
             if (intersects.length > 0) {
                 const target = intersects[0].object;
                 if (selectedObject) resetSelection();
